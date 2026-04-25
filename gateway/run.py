@@ -9860,14 +9860,8 @@ class GatewayRunner:
                     "messages": [],
                     "api_calls": 0,
                     "failed": False,
-                    "compression_exhausted": False,
                     "tools": [],
                     "history_offset": len(agent_history),
-                    "last_prompt_tokens": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "model": None,
-                    "blocked_by_opsec": True,
                 }
             message = _opsec_in.text  # may equal original or be redacted
 
@@ -9913,7 +9907,6 @@ class GatewayRunner:
                     "input_tokens": _input_toks,
                     "output_tokens": _output_toks,
                     "model": _resolved_model,
-                    "blocked_by_opsec": False,
                 }
             
             # Scan tool results for MEDIA:<path> tags that need to be delivered
