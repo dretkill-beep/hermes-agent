@@ -4332,6 +4332,22 @@ class GatewayRunner:
                     "results. This can happen with some models — try again or "
                     "rephrase your question."
                 )
+
+            # OPSEC output guard. Runs before the streaming/already_sent
+            # branch so non-streaming sends are redacted in-flight. Streaming
+            # sends are redacted post-hoc via edit_message; there is a
+            # sub-second window where unredacted text may be visible to the
+            # authorized recipient. Accepted risk for v1; see ADR/SOUL.md.
+            # session_entry.session_id reflects the post-compression session
+            # if compression rolled during this turn.
+            _opsec_out = _opsec_check_output(response, session_id=session_entry.session_id)
+            if _opsec_out.redactions:
+                logger.info(
+                    "opsec output redacted session=%s count=%d",
+                    session_entry.session_id, _opsec_out.redactions,
+                )
+            response = _opsec_out.text
+
             agent_messages = agent_result.get("messages", [])
             _response_time = time.time() - _msg_start_time
             _api_calls = agent_result.get("api_calls", 0)
