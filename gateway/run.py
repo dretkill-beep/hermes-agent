@@ -93,13 +93,6 @@ _hermes_home = get_hermes_home()
 # User-managed env files should override stale shell exports on restart.
 from dotenv import load_dotenv  # backward-compat for tests that monkeypatch this symbol
 from hermes_cli.env_loader import load_hermes_dotenv
-
-# OPSEC content guards (jarvarious-guards distribution, installed editable
-# from ~/jarvarious/agent). Imported eagerly so a missing install fails
-# fast at startup rather than silently no-op'ing on the first message.
-from hermes.guards.input_guard import check_input as _opsec_check_input
-from hermes.guards.output_guard import check_output as _opsec_check_output
-
 _env_path = _hermes_home / '.env'
 load_hermes_dotenv(hermes_home=_hermes_home, project_env=Path(__file__).resolve().parents[1] / '.env')
 
@@ -9830,24 +9823,6 @@ class GatewayRunner:
                     "user's new message below.]\n\n"
                     + message
                 )
-
-            # OPSEC input guard. Runs after every system-note prepend so the
-            # final composed message is what gets scanned.
-            _opsec_in = _opsec_check_input(message, session_id=session_id)
-            if not _opsec_in.allowed:
-                logger.warning(
-                    "opsec input blocked session=%s reason=%s",
-                    session_id, _opsec_in.blocked_reason,
-                )
-                return {
-                    "final_response": f"⚠️ {_opsec_in.blocked_reason}",
-                    "messages": [],
-                    "api_calls": 0,
-                    "failed": False,
-                    "tools": [],
-                    "history_offset": len(agent_history),
-                }
-            message = _opsec_in.text  # may equal original or be redacted
 
             _approval_session_key = session_key or ""
             _approval_session_token = set_current_session_key(_approval_session_key)
