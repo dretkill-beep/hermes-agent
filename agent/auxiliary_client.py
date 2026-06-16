@@ -2018,10 +2018,28 @@ def _resolve_auto(main_runtime: Optional[Dict[str, Any]] = None) -> Tuple[Option
                 logger.info("Auxiliary auto-detect: using %s (%s)", label, model or "default")
             return client, model
         tried.append(label)
-    logger.warning("Auxiliary auto-detect: no provider available (tried: %s). "
-                   "Compression, summarization, and memory flush will not work. "
-                   "Set OPENROUTER_API_KEY or configure a local model in config.yaml.",
-                   ", ".join(tried))
+    # Outage-class: auxiliary fully unavailable means compression, summarization,
+    # session_search, and memory flush are all dead. Per the JARV-RES-05 logging
+    # severity doctrine this MUST be ERROR + a Sentry/Telegram alert, not a
+    # WARNING nobody pages on. Deferred guarded import keeps hermes-agent
+    # isolated from jarvarious (same pattern as the credential_pool patches).
+    _msg = (
+        "Auxiliary auto-detect: no provider available (tried: %s). "
+        "Compression, summarization, and memory flush will not work. "
+        "Set OPENROUTER_API_KEY or configure a local model in config.yaml."
+        % ", ".join(tried)
+    )
+    logger.error(_msg)
+    try:
+        import os as _os
+        import sys as _sys
+        _jv_agent = _os.path.expanduser("~/jarvarious/agent")
+        if _jv_agent not in _sys.path:
+            _sys.path.insert(0, _jv_agent)
+        from db.sentry_client import capture_message as _capture
+        _capture(_msg, level="error")
+    except Exception as _exc:
+        logger.warning("auxiliary severity alert delivery failed: %s", _exc)
     return None, None
 
 
