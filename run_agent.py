@@ -8439,7 +8439,7 @@ class AIAgent:
             ephemeral_out = getattr(self, "_ephemeral_max_output_tokens", None)
             if ephemeral_out is not None:
                 self._ephemeral_max_output_tokens = None  # consume immediately
-            return _transport.build_kwargs(
+            _api_kwargs = _transport.build_kwargs(
                 model=self.model,
                 messages=anthropic_messages,
                 tools=self.tools,
@@ -8452,6 +8452,33 @@ class AIAgent:
                 fast_mode=(self.request_overrides or {}).get("speed") == "fast",
                 drop_context_1m_beta=bool(getattr(self, "_oauth_1m_beta_disabled", False)),
             )
+            # Jarvarious model router — enforce Haiku default, Sonnet only for
+            # document_generation and code_review. Reads JARVARIOUS_TASK_TYPE env
+            # var (set by callers) or falls back to Haiku on any missing/unknown tag.
+            # Safe fallback: missing tag → Haiku, never Sonnet. Same pattern as
+            # the line-898 exhaustion alert and cap-check patches.
+            try:
+                import os as _os
+                import sys as _sys
+                _jv_agent = _os.path.expanduser("~/jarvarious/agent")
+                if _jv_agent not in _sys.path:
+                    _sys.path.insert(0, _jv_agent)
+                from db.model_router import enforce_routing_policy as _route
+                _task_type = (
+                    _os.environ.get("JARVARIOUS_TASK_TYPE", "")
+                    or getattr(self, "_jarvarious_task_type", "")
+                    or "interactive"
+                )
+                _routed_model = _route(_task_type)
+                if _routed_model and _routed_model != _api_kwargs.get("model"):
+                    logger.debug(
+                        "jarvarious model router: task_type=%r -> %s (was %s)",
+                        _task_type, _routed_model, _api_kwargs.get("model"),
+                    )
+                    _api_kwargs["model"] = _routed_model
+            except Exception as _exc:
+                logger.debug("jarvarious model router: skipped (%s)", _exc)
+            return _api_kwargs
 
         # AWS Bedrock native Converse API — bypasses the OpenAI client entirely.
         # The adapter handles message/tool conversion and boto3 calls directly.
