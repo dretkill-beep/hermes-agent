@@ -3144,6 +3144,14 @@ class GatewayRunner:
             )
         asyncio.create_task(self._platform_reconnect_watcher())
 
+        # Event-loop liveness heartbeat (SCRUM-134). Writes a heartbeat file
+        # every 30s from inside the event loop — keeps ticking while cron jobs
+        # run in their worker thread, and freezes only if the loop itself hangs.
+        # The external watchdog (scripts/health_monitor.py) restarts the gateway
+        # when this file goes stale with a live PID — the hung-but-alive case
+        # that launchd's exit-only KeepAlive cannot catch.
+        asyncio.create_task(self._liveness_heartbeat_watcher())
+
         logger.info("Press Ctrl+C to stop")
         
         return True
@@ -3770,6 +3778,30 @@ class GatewayRunner:
             while slept < interval and self._running:
                 await asyncio.sleep(min(1.0, interval - slept))
                 slept += 1.0
+
+    async def _liveness_heartbeat_watcher(self, interval: int = 30) -> None:
+        """Write ~/.hermes/logs/gateway_heartbeat every `interval`s.
+
+        Runs in the event loop, so it keeps updating while cron jobs execute in
+        their own worker thread, and only freezes if the loop itself hangs. A
+        stale heartbeat alongside a live PID is the unambiguous hang signal the
+        external watchdog (scripts/health_monitor.py, SCRUM-134) restarts on —
+        the case launchd's exit-only KeepAlive misses. Never raises.
+        """
+        import os as _os
+        import time as _time
+
+        hb = _os.path.expanduser("~/.hermes/logs/gateway_heartbeat")
+        while self._running:
+            try:
+                with open(hb, "w") as f:
+                    f.write(str(int(_time.time())))
+            except Exception:
+                pass
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
 
     async def _platform_reconnect_watcher(self) -> None:
         """Background task that periodically retries connecting failed platforms.
