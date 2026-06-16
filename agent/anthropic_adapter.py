@@ -260,6 +260,34 @@ _TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14"
 # unknown Anthropic beta headers risk request rejection.
 _CONTEXT_1M_BETA = "context-1m-2025-08-07"
 
+
+def _model_supports_1m_context(model: str | None) -> bool:
+    """Best-effort: does *model* serve a 1M-token context window?
+
+    The ``context-1m-2025-08-07`` beta is only meaningful for the Claude
+    families that actually serve 1M (Opus 4.6+/Sonnet 4.6). Sending it for a
+    model that caps below 1M — notably Haiku 4.5 (200K) and Claude 3.x — is at
+    best a no-op and, on a subscription/aux endpoint, draws a 400
+    ("The long context beta is not yet available for this subscription").
+    SCRUM-219: the compression aux runs on Haiku and was 400ing on this header.
+
+    Returns False only for Claude families we positively know cap below 1M, so
+    the beta is dropped for them. Unknown/None models return True to preserve
+    the historical default of sending the beta (the main agent routes to 1M-GA
+    models and must be unaffected).
+    """
+    if not isinstance(model, str) or not model.strip():
+        return True  # unknown → preserve the historical default
+    m = model.strip().lower()
+    if "/" in m:
+        m = m.rsplit("/", 1)[-1]
+    # Positively-known sub-1M Claude families.
+    if "haiku" in m:
+        return False
+    if m.startswith(("claude-3", "claude-2", "claude-instant")):
+        return False
+    return True
+
 # Fast mode beta — enables the ``speed: "fast"`` request parameter for
 # significantly higher output token throughput on Opus 4.6 (~2.5x).
 # See https://platform.claude.com/docs/en/build-with-claude/fast-mode
@@ -480,6 +508,7 @@ def _common_betas_for_base_url(
     base_url: str | None,
     *,
     drop_context_1m_beta: bool = False,
+    model: str | None = None,
 ) -> list[str]:
     """Return the beta headers that are safe for the configured endpoint.
 
@@ -503,7 +532,11 @@ def _common_betas_for_base_url(
     if _requires_bearer_auth(base_url):
         _stripped = {_TOOL_STREAMING_BETA, _CONTEXT_1M_BETA}
         return [b for b in _COMMON_BETAS if b not in _stripped]
-    if drop_context_1m_beta:
+    # Drop the 1M-context beta when the OAuth retry path asked us to, or when
+    # the resolved model doesn't serve a 1M window (Haiku, Claude 3.x). The
+    # latter is SCRUM-219: the compression aux runs on Haiku and 400'd on this
+    # header. Unknown/None model → keep the beta (main agent is 1M-GA).
+    if drop_context_1m_beta or not _model_supports_1m_context(model):
         return [b for b in _COMMON_BETAS if b != _CONTEXT_1M_BETA]
     return _COMMON_BETAS
 
@@ -514,6 +547,7 @@ def build_anthropic_client(
     timeout: float = None,
     *,
     drop_context_1m_beta: bool = False,
+    model: str | None = None,
 ):
     """Create an Anthropic client, auto-detecting setup-tokens vs API keys.
 
@@ -528,6 +562,11 @@ def build_anthropic_client(
     path in ``run_agent.py`` when a subscription rejects the beta; leave at
     its default on fresh clients so 1M-capable subscriptions keep the
     capability.
+
+    ``model`` (when known) lets the adapter drop the 1M-context beta
+    proactively for models that don't serve a 1M window (Haiku, Claude 3.x),
+    so callers don't need the reactive retry. Omit it (None) to preserve the
+    historical default of sending the beta. See SCRUM-219.
 
     Returns an anthropic.Anthropic instance.
     """
@@ -561,6 +600,7 @@ def build_anthropic_client(
     common_betas = _common_betas_for_base_url(
         normalized_base_url,
         drop_context_1m_beta=drop_context_1m_beta,
+        model=model,
     )
 
     if _is_kimi_coding_endpoint(base_url):

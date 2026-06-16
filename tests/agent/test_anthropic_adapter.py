@@ -90,6 +90,53 @@ class TestBuildAnthropicClient:
             assert "interleaved-thinking-2025-05-14" in betas
             assert "fine-grained-tool-streaming-2025-05-14" in betas
 
+    def test_haiku_model_drops_context_1m_beta(self):
+        """SCRUM-219: passing a sub-1M model (Haiku) drops context-1m so the
+        compression aux stops 400ing, while every other beta is preserved."""
+        with patch("agent.anthropic_adapter._anthropic_sdk") as mock_sdk:
+            build_anthropic_client(
+                "sk-ant-api03-x",
+                model="claude-haiku-4-5-20251001",
+            )
+            kwargs = mock_sdk.Anthropic.call_args[1]
+            betas = kwargs["default_headers"]["anthropic-beta"]
+            assert "context-1m-2025-08-07" not in betas
+            assert "interleaved-thinking-2025-05-14" in betas
+            assert "fine-grained-tool-streaming-2025-05-14" in betas
+
+    def test_1m_capable_model_keeps_context_1m_beta(self):
+        """A known 1M-capable model (Sonnet) keeps the beta untouched."""
+        with patch("agent.anthropic_adapter._anthropic_sdk") as mock_sdk:
+            build_anthropic_client(
+                "sk-ant-api03-x",
+                model="claude-sonnet-4-6",
+            )
+            kwargs = mock_sdk.Anthropic.call_args[1]
+            betas = kwargs["default_headers"]["anthropic-beta"]
+            assert "context-1m-2025-08-07" in betas
+
+    def test_unknown_model_preserves_historical_default(self):
+        """model=None must keep the historical default of sending the beta so
+        the 1M-GA main agent is unaffected."""
+        with patch("agent.anthropic_adapter._anthropic_sdk") as mock_sdk:
+            build_anthropic_client("sk-ant-api03-x", model=None)
+            kwargs = mock_sdk.Anthropic.call_args[1]
+            betas = kwargs["default_headers"]["anthropic-beta"]
+            assert "context-1m-2025-08-07" in betas
+
+    def test_model_supports_1m_context_helper(self):
+        """Unit-cover the discriminator directly, incl. provider-prefixed tags."""
+        from agent.anthropic_adapter import _model_supports_1m_context
+
+        assert _model_supports_1m_context("claude-sonnet-4-6") is True
+        assert _model_supports_1m_context("claude-opus-4-8") is True
+        assert _model_supports_1m_context(None) is True
+        assert _model_supports_1m_context("") is True
+        assert _model_supports_1m_context("claude-haiku-4-5-20251001") is False
+        assert _model_supports_1m_context("anthropic/claude-haiku-4-5") is False
+        assert _model_supports_1m_context("claude-3-5-sonnet-20241022") is False
+        assert _model_supports_1m_context("claude-instant-1.2") is False
+
     def test_api_key_uses_api_key(self):
         with patch("agent.anthropic_adapter._anthropic_sdk") as mock_sdk:
             build_anthropic_client("sk-ant-api03-something")
