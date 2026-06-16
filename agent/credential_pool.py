@@ -891,11 +891,82 @@ class CredentialPool:
             self._persist()
         return available
 
+    def _check_daily_cap(self) -> None:
+        """Check today's spend against the configured daily cap.
+
+        Reads jarvarious_budget.daily_cap_usd from config.yaml.
+        Reads today's spend from jarvarious.db api_calls.
+        If daily_override is true, passes unconditionally (approved heavy day).
+        Raises RuntimeError with cap and spend named if breached.
+        Deferred imports keep hermes-agent isolated from jarvarious — same
+        pattern as the line-898 exhaustion alert patch.
+        """
+        try:
+            import os as _os
+            import sqlite3 as _sqlite3
+            import sys as _sys
+            from datetime import datetime as _dt
+
+            # Load budget config
+            _cfg = _load_config_safe() or {}
+            _budget = _cfg.get("jarvarious_budget", {})
+            _cap = float(_budget.get("daily_cap_usd", 0))
+            if _cap <= 0:
+                return  # no cap configured — pass
+
+            # Check one-time daily override flag
+            if _budget.get("daily_override", False):
+                logger.info("credential pool: daily override active — cap check skipped")
+                return
+
+            # Read today's spend from jarvarious.db
+            _db_path = _os.path.expanduser("~/jarvarious/agent/db/jarvarious.db")
+            if not _os.path.exists(_db_path):
+                return  # no db yet — pass
+
+            _conn = _sqlite3.connect(_db_path)
+            _row = _conn.execute(
+                "SELECT COALESCE(SUM(cost_cents), 0) FROM api_calls "
+                "WHERE date(timestamp) = date('now', 'utc')"
+            ).fetchone()
+            _conn.close()
+            _spend_usd = float(_row[0]) / 100.0 if _row else 0.0
+
+            if _spend_usd >= _cap:
+                _msg = (
+                    f"credential pool: daily cap breached — "
+                    f"cap=${_cap:.2f} spend=${_spend_usd:.4f}. "
+                    f"Set jarvarious_budget.daily_override: true in config.yaml "
+                    f"to approve this day, or wait for midnight UTC reset."
+                )
+                logger.error(_msg)
+                raise RuntimeError(_msg)
+
+        except RuntimeError:
+            raise
+        except Exception as _exc:
+            logger.warning("credential pool: cap check failed (passing): %s", _exc)
+
     def _select_unlocked(self) -> Optional[PooledCredential]:
+        # Check daily spend cap before issuing any credential.
+        self._check_daily_cap()
+
         available = self._available_entries(clear_expired=True, refresh=True)
         if not available:
             self._current_id = None
-            logger.info("credential pool: no available entries (all exhausted or empty)")
+            logger.error("credential pool: no available entries (all exhausted or empty)")
+            # Fire Sentry + Telegram alert. Import is deferred and guarded so
+            # hermes-agent never hard-fails if jarvarious is not on sys.path.
+            try:
+                import sys as _sys
+                import os as _os
+                _jv_agent = _os.path.expanduser("~/jarvarious/agent")
+                if _jv_agent not in _sys.path:
+                    _sys.path.insert(0, _jv_agent)
+                from db.sentry_client import alert_credential_exhaustion
+                alert_credential_exhaustion()
+            except Exception as _exc:
+                logger.warning("credential pool: alert delivery failed: %s", _exc)
             return None
 
         if self._strategy == STRATEGY_RANDOM:
