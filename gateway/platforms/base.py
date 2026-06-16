@@ -2829,6 +2829,25 @@ class BasePlatformAdapter(ABC):
 
                 # Send the text portion
                 if text_content:
+                    # Jarvarious Verification Gate (SCRUM-185, label mode): the
+                    # main conversational reply does NOT route through
+                    # send_message_tool, so gate it here too — label an unbacked
+                    # completion claim before it ships. Collision-free stdlib
+                    # shim (~/jarvarious/agent/jarvarious_gate.py); fail-safe.
+                    try:
+                        import os as _jv_os
+                        import sys as _jv_sys
+
+                        _jv_agent = _jv_os.path.expanduser("~/jarvarious/agent")
+                        if _jv_agent not in _jv_sys.path:
+                            _jv_sys.path.insert(0, _jv_agent)
+                        import jarvarious_gate as _jv_gate
+
+                        text_content = _jv_gate.gate_outbound(
+                            text_content, mode="observe"
+                        )
+                    except Exception:
+                        pass
                     logger.info("[%s] Sending response (%d chars) to %s", self.name, len(text_content), event.source.chat_id)
                     _reply_anchor = (
                         event.reply_to_message_id
