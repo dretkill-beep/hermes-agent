@@ -2340,3 +2340,28 @@ registry.register(
     emoji="💻",
     max_result_size_chars=100_000,
 )
+
+
+# --- Jarvarious Verification Gate producer (SCRUM-163) ---------------------
+# Record a receipt for every terminal_tool execution so the send-path gate can
+# tell a backed "done" from a fabricated one. Additive wrapper at module end;
+# fail-safe: any error here returns the original result unchanged.
+_jv_terminal_tool_impl = terminal_tool
+
+
+def terminal_tool(*args, **kwargs):  # noqa: F811
+    _jv_result = _jv_terminal_tool_impl(*args, **kwargs)
+    try:
+        import os as _jv_os
+        import sys as _jv_sys
+
+        _jv_agent = _jv_os.path.expanduser("~/jarvarious/agent")
+        if _jv_agent not in _jv_sys.path:
+            _jv_sys.path.insert(0, _jv_agent)
+        import jarvarious_gate as _jv_gate
+
+        _jv_cmd = args[0] if args else kwargs.get("command", "")
+        _jv_gate.record_action_from_result(_jv_cmd, _jv_result)
+    except Exception:
+        pass
+    return _jv_result
