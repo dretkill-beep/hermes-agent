@@ -465,6 +465,23 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
 
     media_files = media_files or []
 
+    # Jarvarious Verification Gate (label mode) - label unbacked outbound claims
+    # via the collision-free shim (jarvarious_gate at the repo root). hermes-agent
+    # has its own `tools` package, so `from tools.send_gate` would silently no-op;
+    # a unique top-level name avoids that. Fail-safe: never blocks or raises.
+    try:
+        import os as _jv_os
+        import sys as _jv_sys
+
+        _jv_agent = _jv_os.path.expanduser("~/jarvarious/agent")
+        if _jv_agent not in _jv_sys.path:
+            _jv_sys.path.insert(0, _jv_agent)
+        import jarvarious_gate as _jv_gate
+
+        message = _jv_gate.gate_outbound(message, mode="observe")
+    except Exception:
+        pass
+
     if platform == Platform.SLACK and message:
         try:
             slack_adapter = SlackAdapter.__new__(SlackAdapter)
