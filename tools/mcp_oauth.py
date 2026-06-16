@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # Lazy imports -- MCP SDK with OAuth support is optional
 # ---------------------------------------------------------------------------
 
-_OAUTH_AVAILABLE = False
+_OAUTH_AVAILABLE=False
 try:
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import (
@@ -61,11 +61,15 @@ try:
         OAuthClientMetadata,
         OAuthToken,
     )
-    from pydantic import AnyUrl
 
-    _OAUTH_AVAILABLE = True
+    _OAUTH_AVAILABLE=True
 except ImportError:
     logger.debug("MCP OAuth types not available -- OAuth MCP auth disabled")
+
+try:
+    from pydantic import AnyUrl
+except ImportError:
+    AnyUrl = None  # type: ignore[assignment, misc]
 
 
 # ---------------------------------------------------------------------------
@@ -519,12 +523,6 @@ def _maybe_preregister_client(
     logger.debug("Pre-registered client_id=%s for '%s'", client_id, storage._server_name)
 
 
-def _parse_base_url(server_url: str) -> str:
-    """Strip path component from server URL, returning the base origin."""
-    parsed = urlparse(server_url)
-    return f"{parsed.scheme}://{parsed.netloc}"
-
-
 def build_oauth_auth(
     server_name: str,
     server_url: str,
@@ -570,7 +568,7 @@ def build_oauth_auth(
     _maybe_preregister_client(storage, cfg, client_metadata)
 
     return OAuthClientProvider(
-        server_url=_parse_base_url(server_url),
+        server_url=server_url,
         client_metadata=client_metadata,
         storage=storage,
         redirect_handler=_redirect_handler,
