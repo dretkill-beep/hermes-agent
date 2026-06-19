@@ -2843,9 +2843,10 @@ class BasePlatformAdapter(ABC):
                             _jv_sys.path.insert(0, _jv_agent)
                         import jarvarious_gate as _jv_gate
 
-                        # mode=None -> jarvarious config gate.mode drives the
-                        # level (SCRUM-163/186; currently label). Never blocks.
-                        text_content = _jv_gate.gate_outbound(text_content)
+                        # gate_with_resend = block-safe entry; config gate.mode
+                        # drives the level (SCRUM-163/186). In block, an unbacked
+                        # claim downgrades to UNVERIFIED rather than dropping. Never raises.
+                        text_content = _jv_gate.gate_with_resend(text_content)
                     except Exception:
                         pass
                     logger.info("[%s] Sending response (%d chars) to %s", self.name, len(text_content), event.source.chat_id)

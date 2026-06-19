@@ -478,10 +478,11 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             _jv_sys.path.insert(0, _jv_agent)
         import jarvarious_gate as _jv_gate
 
-        # mode=None -> jarvarious config gate.mode drives observe/label/block
-        # (SCRUM-163/186). Currently label: unbacked "done" claims get an inline
-        # UNVERIFIED note; never blocks. Fail-safe wrapper below still applies.
-        message = _jv_gate.gate_outbound(message)
+        # gate_with_resend is the block-SAFE entry: config gate.mode drives
+        # observe/label/block (SCRUM-163/186). In block mode an unbacked "done"
+        # claim is never dropped and never ships bare — it downgrades to an inline
+        # UNVERIFIED note (the block-aware resend path). Fail-safe wrapper still applies.
+        message = _jv_gate.gate_with_resend(message)
     except Exception:
         pass
 
