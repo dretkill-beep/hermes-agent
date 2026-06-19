@@ -3152,6 +3152,24 @@ class GatewayRunner:
         # that launchd's exit-only KeepAlive cannot catch.
         asyncio.create_task(self._liveness_heartbeat_watcher())
 
+        # Egress guard (SCRUM-221): install the outbound-HTTP guard at gateway BOOT
+        # so it covers all gateway traffic immediately — not only after the first
+        # session:start (the sentry-init hook also installs it, but that leaves
+        # background/early traffic unguarded). Idempotent + fail-safe; mode follows
+        # the jarvarious egress config (observe by default — logs, never blocks).
+        try:
+            import os as _os
+            import sys as _sys
+
+            _jv = _os.path.expanduser("~/jarvarious/agent")
+            if _jv not in _sys.path:
+                _sys.path.insert(0, _jv)
+            from db.egress_hook import install_egress_hook as _install_egress
+
+            _install_egress()
+        except Exception as _exc:
+            logger.debug("egress hook boot-install skipped: %s", _exc)
+
         logger.info("Press Ctrl+C to stop")
         
         return True
