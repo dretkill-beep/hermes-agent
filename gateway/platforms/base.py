@@ -2738,6 +2738,20 @@ class BasePlatformAdapter(ABC):
         try:
             await self._run_processing_hook("on_processing_start", event)
 
+            # Inbound push-screening (config-gated, default OFF — zero behavior
+            # change until inbound_screening.mode is flipped). Screens untrusted
+            # external content (body/sender/quote/attachment names) for prompt
+            # injection before it reaches the agent. In off mode this returns the
+            # identical event at ~zero cost; observe logs; block redacts in place
+            # but NEVER drops the message. Fail-safe: any error proceeds with the
+            # original event (mirrors the gate_with_resend defensive posture below).
+            try:
+                from gateway import inbound_screen as _inbound_screen
+
+                event, _q = _inbound_screen.screen_event(event)
+            except Exception:
+                pass
+
             # Call the handler (this can take a while with tool calls)
             response = await self._message_handler(event)
 
